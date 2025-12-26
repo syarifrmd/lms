@@ -30,6 +30,7 @@ create or replace function public.is_admin(uid uuid default auth.uid())
 returns boolean
 language sql
 stable
+security definer
 as $$
   select exists (
     select 1 from public.profiles p where p.user_id = uid and p.role = 'admin'
@@ -40,6 +41,7 @@ create or replace function public.is_trainer(uid uuid default auth.uid())
 returns boolean
 language sql
 stable
+security definer
 as $$
   select exists (
     select 1 from public.profiles p where p.user_id = uid and p.role in ('trainer','admin')
@@ -234,7 +236,10 @@ drop policy if exists profiles_update_own on public.profiles;
 create policy profiles_update_own on public.profiles
   for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 
--- allow inserts only for service role; skip explicit insert policy
+-- allow inserts for self-registration (fallback if trigger fails)
+drop policy if exists profiles_insert_own on public.profiles;
+create policy profiles_insert_own on public.profiles
+  for insert to authenticated with check (user_id = auth.uid());
 
 -- COURSES policies
 drop policy if exists courses_read_all_published on public.courses;
