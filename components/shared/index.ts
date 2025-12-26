@@ -1,0 +1,2 @@
+export { QuizComponent } from './QuizComponent';
+
