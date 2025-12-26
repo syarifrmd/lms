@@ -1,12 +1,24 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { User, Course, Module, Quiz, QuizResult, Badge, LeaderboardEntry, UserRole } from '../types';
+import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import "../global.css";
+import { supabase } from '../lib/supabase';
+import { getCurrentProfile, signOut } from '../services/authService';
+import { Badge, Course, LeaderboardEntry, Module, Quiz, QuizResult, User, UserRole } from '../types';
+import { Profile } from '../types/database';
+
 // Re-export for convenience
-export type { UserRole, QuizResult, Course, Module, Quiz, Badge, User };
+export type { Badge, Course, Module, Quiz, QuizResult, User, UserRole };
 
 interface AppContextType {
+  // Auth state
+  currentProfile: Profile | null;
+  setCurrentProfile: (profile: Profile | null) => void;
+  isLoading: boolean;
+  logout: () => Promise<void>;
+  
+  // Legacy support - maps Profile to old User type
   currentUser: User | null;
   setCurrentUser: (user: User | null) => void;
+  
   courses: Course[];
   setCourses: (courses: Course[]) => void;
   modules: Module[];
@@ -24,6 +36,21 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+// Helper function to convert Profile to User (for backward compatibility)
+function profileToUser(profile: Profile): User {
+  return {
+    id: profile.user_id,
+    name: profile.full_name || profile.email.split('@')[0],
+    email: profile.email,
+    role: profile.role === 'user' ? 'dse' : (profile.role as UserRole),
+    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.email}`,
+    department: profile.region || 'Unknown',
+    joinDate: profile.created_at,
+    points: 0,
+    level: 1,
+  };
+}
 
 // Mock Data
 const mockUsers: User[] = [
@@ -346,6 +373,11 @@ const mockLeaderboard: LeaderboardEntry[] = [
 ];
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // Auth state
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Legacy state
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [courses, setCourses] = useState<Course[]>(mockCourses);
   const [modules, setModules] = useState<Module[]>(mockModules);
@@ -355,6 +387,68 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [users] = useState<User[]>(mockUsers);
   const [badges] = useState<Badge[]>(mockBadges);
   const [showLanding, setShowLanding] = useState<boolean>(true);
+
+  // Initialize auth session on app start
+  useEffect(() => {
+    initializeAuth();
+    
+    // Listen for auth changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth event:', event);
+        if (event === 'SIGNED_IN' && session?.user) {
+          await loadUserProfile();
+        } else if (event === 'SIGNED_OUT') {
+          setCurrentProfile(null);
+          setCurrentUser(null);
+        }
+      }
+    );
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Sync currentUser with currentProfile
+  useEffect(() => {
+    if (currentProfile) {
+      setCurrentUser(profileToUser(currentProfile));
+    } else {
+      setCurrentUser(null);
+    }
+  }, [currentProfile]);
+
+  const initializeAuth = async () => {
+    try {
+      setIsLoading(true);
+      await loadUserProfile();
+    } catch (error) {
+      console.error('Auth initialization error:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadUserProfile = async () => {
+    try {
+      const profile = await getCurrentProfile();
+      setCurrentProfile(profile);
+    } catch (error) {
+      console.error('Load profile error:', error);
+      setCurrentProfile(null);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await signOut();
+      setCurrentProfile(null);
+      setCurrentUser(null);
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
 
   const updateModuleProgress = (moduleId: string, completed: boolean) => {
     setModules((prev) =>
@@ -388,6 +482,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   return (
     <AppContext.Provider
       value={{
+        // Auth
+        currentProfile,
+        setCurrentProfile,
+        isLoading,
+        logout,
+        
+        // Legacy
         currentUser,
         setCurrentUser,
         courses,
