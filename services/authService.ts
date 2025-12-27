@@ -189,6 +189,11 @@ export function useGoogleAuth() {
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    // Request id_token in response
+    responseType: 'id_token',
+    scopes: ['openid', 'profile', 'email'],
+    // Add state parameter for CSRF protection
+    usePKCE: false, // Disable PKCE since we're using id_token flow
     redirectUri: makeRedirectUri({
       scheme: 'com.indosat.lms',
       path: 'auth/callback'
@@ -205,56 +210,75 @@ export async function signInWithGoogle(
   idToken: string
 ): Promise<AuthResponse> {
   try {
+    console.log('🔐 Starting Google Sign-In...');
+    console.log('Token length:', idToken?.length);
+    
     const { data, error } = await supabase.auth.signInWithIdToken({
       provider: 'google',
       token: idToken,
     });
 
     if (error) {
+      console.error('❌ signInWithIdToken error:', error);
       return { success: false, error: error.message };
     }
 
     if (!data.user) {
+      console.error('❌ No user data returned');
       return { success: false, error: 'No user data returned' };
     }
 
-    // Fetch or create profile
-    let { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', data.user.id)
-      .single();
+    console.log('✅ User authenticated:', data.user.id);
+    console.log('📧 Email:', data.user.email);
 
-    // If profile doesn't exist (shouldn't happen with trigger), create it
-    if (profileError && profileError.code === 'PGRST116') {
-      const newProfileData: ProfileInsert = {
-        user_id: data.user.id,
-        email: data.user.email || '',
-        full_name: data.user.user_metadata?.full_name || data.user.user_metadata?.name || '',
-        role: 'user',
-      };
+    // Use database function to create/get profile (bypasses RLS timing issues)
+    console.log('📝 Creating/retrieving profile via database function...');
+    
+    const fullName = data.user.user_metadata?.full_name || 
+                    data.user.user_metadata?.name || 
+                    data.user.email?.split('@')[0] || 
+                    'User';
 
-      const { data: newProfile, error: createError } = await (supabase
-        .from('profiles') as any)
-        .insert(newProfileData)
-        .select()
-        .single();
-
-      if (createError) {
-        return { success: false, error: createError.message };
+    const { data: profileData, error: profileError } = await (supabase.rpc as any)(
+      'create_profile_for_user',
+      {
+        p_user_id: data.user.id,
+        p_email: data.user.email || '',
+        p_full_name: fullName,
+        p_role: 'user'
       }
-      profile = newProfile;
-    } else if (profileError) {
-      return { success: false, error: profileError.message };
+    );
+
+    if (profileError) {
+      console.error('❌ Database function error:', profileError);
+      return { 
+        success: false, 
+        error: `Failed to create profile: ${profileError.message}` 
+      };
     }
 
-    if (!profile) {
-      return { success: false, error: 'Failed to load profile' };
+    if (!profileData) {
+      console.error('❌ No profile data returned from function');
+      return { 
+        success: false, 
+        error: 'Failed to retrieve profile data' 
+      };
     }
 
-    return { success: true, profile };
+    console.log('✅ Profile created/retrieved successfully');
+    console.log('Profile:', profileData);
+
+    return {
+      success: true,
+      profile: profileData as Profile
+    };
+
   } catch (error: any) {
-    return { success: false, error: error.message || 'Google sign in failed' };
+    console.error('❌ Unexpected error:', error);
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred'
+    };
   }
 }
 

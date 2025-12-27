@@ -31,8 +31,23 @@ export const Login: React.FC = () => {
       setLoading(true);
       setError('');
       
-      const { id_token } = response.params;
-      const result = await signInWithGoogle(id_token);
+      // Extract id_token from response - check multiple possible locations
+      let idToken = response.authentication?.idToken || 
+                   response.params?.id_token || 
+                   response.params?.authentication?.idToken;
+
+      console.log('Google OAuth Response Type:', response.type);
+      console.log('Has authentication object:', !!response.authentication);
+      console.log('Has params object:', !!response.params);
+      console.log('Extracted idToken:', idToken ? 'Found' : 'Not found');
+
+      if (!idToken) {
+        console.error('Full response structure:', JSON.stringify(response, null, 2));
+        setError('No ID token received from Google. Please try again.');
+        return;
+      }
+
+      const result = await signInWithGoogle(idToken);
 
       if (result.success && result.profile) {
         setCurrentProfile(result.profile);
@@ -41,6 +56,7 @@ export const Login: React.FC = () => {
         setError(result.error || 'Google sign in failed');
       }
     } catch (err: any) {
+      console.error('Google auth error:', err);
       setError(err.message || 'Google authentication error');
     } finally {
       setLoading(false);
