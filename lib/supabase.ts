@@ -14,10 +14,24 @@ const getAsyncStorage = async () => {
   return undefined;
 };
 
+const getWebStorage = () => {
+  try {
+    if (typeof window === 'undefined') return undefined;
+    if (!('localStorage' in window)) return undefined;
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+};
+
 // Custom storage adapter that handles lazy loading
 const customStorageAdapter = {
   getItem: async (key: string) => {
     try {
+      if (Platform.OS === 'web') {
+        const storage = getWebStorage();
+        return storage ? storage.getItem(key) : null;
+      }
       const AsyncStorage = await getAsyncStorage();
       if (AsyncStorage) {
         return await AsyncStorage.getItem(key);
@@ -30,6 +44,11 @@ const customStorageAdapter = {
   },
   setItem: async (key: string, value: string) => {
     try {
+      if (Platform.OS === 'web') {
+        const storage = getWebStorage();
+        if (storage) storage.setItem(key, value);
+        return;
+      }
       const AsyncStorage = await getAsyncStorage();
       if (AsyncStorage) {
         await AsyncStorage.setItem(key, value);
@@ -40,6 +59,11 @@ const customStorageAdapter = {
   },
   removeItem: async (key: string) => {
     try {
+      if (Platform.OS === 'web') {
+        const storage = getWebStorage();
+        if (storage) storage.removeItem(key);
+        return;
+      }
       const AsyncStorage = await getAsyncStorage();
       if (AsyncStorage) {
         await AsyncStorage.removeItem(key);

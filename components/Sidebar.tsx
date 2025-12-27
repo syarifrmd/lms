@@ -1,23 +1,21 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, Image, ScrollView } from 'react-native';
-import { useRouter, usePathname } from 'expo-router';
+import { useApp } from '@/context/AppContext';
+import { usePathname, useRouter } from 'expo-router';
 import {
-  LayoutDashboard,
-  BookOpen,
-  Users,
   Award,
-  Trophy,
-  GraduationCap,
-  FileText,
   BarChart3,
-  Settings,
+  BookOpen,
+  FileText,
+  GraduationCap,
+  LayoutDashboard,
   LogOut,
   Menu,
-  X,
-  Bug,
-  UploadCloud,
+  Settings,
+  Trophy,
+  Users,
+  X
 } from 'lucide-react-native';
-import { useApp } from '@/context/AppContext';
+import React from 'react';
+import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 
 interface SidebarProps {
   isMobileOpen: boolean;
@@ -28,7 +26,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen,
   setIsMobileOpen,
 }) => {
-  const { currentUser, setCurrentUser } = useApp();
+  const { currentUser, logout } = useApp();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -63,17 +61,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const menuItems = [
-    ...getMenuItems(),
-    { id: 'yt-debug', label: 'YouTube Debug', icon: Bug, path: '/debug/yt-api' },
-    { id: 'yt-oauth', label: 'YouTube OAuth', icon: Bug, path: '/debug/yt-oauth' },
-    { id: 'yt-upload', label: 'YouTube Upload', icon: UploadCloud, path: '/debug/yt-upload' },
-  ];
+  const menuItems = getMenuItems();
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setIsMobileOpen(false);
-    router.replace('/login');
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      setIsMobileOpen(false);
+      router.replace('/login');
+    }
   };
 
   const SidebarContent = () => (

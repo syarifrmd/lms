@@ -1,16 +1,16 @@
-import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import {
-  BookOpen,
-  Users,
-  TrendingUp,
-  Plus,
-  Video,
-  FileText,
-  Award,
-} from 'lucide-react-native';
 import { useApp } from '@/context/AppContext';
-import { User, Course } from '@/types';
+import { Course, User } from '@/types';
+import {
+  Award,
+  BookOpen,
+  FileText,
+  Plus,
+  TrendingUp,
+  Users,
+  Video,
+} from 'lucide-react-native';
+import React from 'react';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 
 export const TrainerDashboard: React.FC = () => {
   const { courses, users } = useApp();
