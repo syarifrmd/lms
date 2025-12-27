@@ -36,12 +36,61 @@ export async function signInWithEmail(
       return { success: false, error: 'No user data returned' };
     }
 
-    // Fetch user profile
-    const { data: profile, error: profileError } = await supabase
+    // Fetch user profile (use maybeSingle to avoid coercion errors)
+    let { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
       .eq('user_id', data.user.id)
-      .single();
+      .maybeSingle();
+
+    // Handle PostgREST error: "Cannot coerce the result to a single JSON object"
+    if (profileError && /Cannot coerce the result to a single JSON object/i.test(profileError.message)) {
+      // Fallback: Use server-side function to get/create a single profile
+      const fullName = data.user.user_metadata?.full_name || 
+                      data.user.user_metadata?.name || 
+                      data.user.email?.split('@')[0] || 
+                      'User';
+
+      const { data: profileData, error: fnError } = await (supabase.rpc as any)(
+        'create_profile_for_user',
+        {
+          p_user_id: data.user.id,
+          p_email: data.user.email || '',
+          p_full_name: fullName,
+          p_role: 'user'
+        }
+      );
+
+      if (fnError) {
+        return { success: false, error: fnError.message };
+      }
+
+      return { success: true, profile: profileData as Profile };
+    }
+
+    // If no profile found (null), attempt to create via function to bypass RLS timing issues
+    if (!profile) {
+      const fullName = data.user.user_metadata?.full_name || 
+                      data.user.user_metadata?.name || 
+                      data.user.email?.split('@')[0] || 
+                      'User';
+
+      const { data: profileData, error: fnError } = await (supabase.rpc as any)(
+        'create_profile_for_user',
+        {
+          p_user_id: data.user.id,
+          p_email: data.user.email || '',
+          p_full_name: fullName,
+          p_role: 'user'
+        }
+      );
+
+      if (fnError) {
+        return { success: false, error: fnError.message };
+      }
+
+      return { success: true, profile: profileData as Profile };
+    }
 
     if (profileError) {
       return { success: false, error: profileError.message };
@@ -82,21 +131,41 @@ export async function signUpWithEmail(
       return { success: false, error: 'No user data returned' };
     }
 
-    // Profile should be created automatically by trigger
-    // Wait a bit for trigger to complete
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Try to create/get profile via server-side function (avoids RLS timing issues)
+    const displayName = fullName || data.user.user_metadata?.full_name || 
+                        data.user.user_metadata?.name || 
+                        data.user.email?.split('@')[0] || 'User';
 
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', data.user.id)
-      .single();
+    const { data: profileData, error: fnError } = await (supabase.rpc as any)(
+      'create_profile_for_user',
+      {
+        p_user_id: data.user.id,
+        p_email: data.user.email || email,
+        p_full_name: displayName,
+        p_role: 'user'
+      }
+    );
 
-    if (profileError) {
-      return { success: false, error: profileError.message };
+    if (fnError) {
+      // Fallback to direct select with maybeSingle
+      let { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', data.user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        return { success: false, error: profileError.message };
+      }
+
+      if (!profile) {
+        return { success: false, error: 'Profile creation failed' };
+      }
+
+      return { success: true, profile };
     }
 
-    return { success: true, profile };
+    return { success: true, profile: profileData as Profile };
   } catch (error: any) {
     return { success: false, error: error.message || 'Sign up failed' };
   }
@@ -144,7 +213,31 @@ export async function getCurrentProfile(): Promise<Profile | null> {
       .from('profiles')
       .select('*')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
+
+    if (error && /Cannot coerce the result to a single JSON object/i.test(error.message)) {
+      // Fallback to function to ensure single profile
+      const fullName = user.user_metadata?.full_name || 
+                      user.user_metadata?.name || 
+                      user.email?.split('@')[0] || 'User';
+
+      const { data: profileData, error: fnError } = await (supabase.rpc as any)(
+        'create_profile_for_user',
+        {
+          p_user_id: user.id,
+          p_email: user.email || '',
+          p_full_name: fullName,
+          p_role: 'user'
+        }
+      );
+
+      if (fnError) {
+        console.error('Get profile via function error:', fnError);
+        return null;
+      }
+
+      return profileData as Profile;
+    }
 
     if (error) {
       console.error('Get profile error:', error);
