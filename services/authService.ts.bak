@@ -50,6 +50,7 @@ export interface AuthResponse {
 }
 
 type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
+type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
 
 type AuthUserLike = {
   id: string;
@@ -57,43 +58,64 @@ type AuthUserLike = {
   user_metadata?: any;
 };
 
-async function ensureProfileForUser(user: AuthUserLike): Promise<AuthResponse> {
-  // Create a minimal profile from auth user data to allow immediate login.
-  // The actual DB profile should be created by trigger; we'll try to fetch it
-  // but won't block login if RLS prevents reading.
-  
-  console.log('[ensureProfile] Creating profile for user:', user.id);
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  // Try to fetch from DB once (non-blocking if fails due to RLS)
-  try {
-    const { data: profile } = await supabase
-      .from('profiles')
+async function ensureProfileForUser(user: AuthUserLike): Promise<AuthResponse> {
+  // Goal: return a profile even if the DB trigger is slow/missing.
+  // Strategy: poll for existence; if missing, try one upsert; keep polling.
+
+  const maxAttempts = 12; // ~10s total with backoff
+  let didUpsert = false;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { data: profile, error: profileError } = await (supabase
+      .from('profiles') as any)
       .select('*')
       .eq('user_id', user.id)
       .maybeSingle();
 
     if (profile) {
-      console.log('[ensureProfile] Profile fetched from DB');
       return { success: true, profile };
     }
-  } catch (e) {
-    console.warn('[ensureProfile] Could not fetch profile from DB:', e);
+
+    // If RLS/network/etc prevents reading, fail fast with the real error.
+    if (profileError) {
+      return { success: false, error: profileError.message };
+    }
+
+    // Not found: on first pass, attempt to create/upsert a minimal profile.
+    if (!didUpsert) {
+      didUpsert = true;
+      const newProfileData: ProfileInsert = {
+        user_id: user.id,
+        email: user.email || '',
+        full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
+        role: 'user',
+      };
+
+      const { error: upsertError } = await (supabase
+        .from('profiles') as any)
+        .upsert(newProfileData, { onConflict: 'user_id' });
+
+      // If insert is blocked by RLS, the next loop would also never find it.
+      // Return this error directly so it’s actionable.
+      if (upsertError) {
+        return { success: false, error: upsertError.message };
+      }
+    }
+
+    // Backoff: 500ms, 700ms, 900ms, ... up to 1500ms
+    const delay = Math.min(500 + attempt * 200, 1500);
+    await sleep(delay);
   }
 
-  // Fallback: create minimal profile from auth user metadata
-  // This allows login to succeed even if RLS blocks the read
-  console.log('[ensureProfile] Using fallback profile from auth metadata');
-  const fallbackProfile: Profile = {
-    user_id: user.id,
-    email: user.email || '',
-    full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-    role: 'user',
-    employee_id: user.user_metadata?.employee_id || null,
-    region: user.user_metadata?.region || null,
-    created_at: new Date().toISOString(),
+  return {
+    success: false,
+    error:
+      'Profile creation timed out. Your account may have been created but the profile row is missing/blocked. Please try again, or check Supabase profiles trigger + RLS policies.',
   };
-
-  return { success: true, profile: fallbackProfile };
 }
 
 /**
@@ -115,6 +137,14 @@ export async function signInWithEmail(
 
     if (!data.user) {
       return { success: false, error: 'No user data returned' };
+    }
+
+    // Ensure subsequent RLS queries are authenticated.
+    if (data.session) {
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
     }
 
     return await ensureProfileForUser(data.user as any);
@@ -241,6 +271,7 @@ export async function updateProfile(
  * Setup Google OAuth hook
  */
 export function useGoogleAuth() {
+  // Validate Google Client ID is configured
   const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
 
   if (!clientId || clientId === 'your_google_client_id_here') {
@@ -250,14 +281,11 @@ export function useGoogleAuth() {
   }
 
   const [request, response, promptAsync] = Google.useAuthRequest({
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    // Request id_token in response
+    iosClientId: clientId,
+    androidClientId: clientId,
+    webClientId: clientId,
+    scopes: ['openid', 'email', 'profile'],
     responseType: 'id_token',
-    scopes: ['openid', 'profile', 'email'],
-    // Add state parameter for CSRF protection
-    usePKCE: false, // Disable PKCE since we're using id_token flow
     redirectUri: makeRedirectUri({
       scheme: APP_SCHEME,
       path: 'auth/callback'
@@ -268,16 +296,25 @@ export function useGoogleAuth() {
 }
 
 /**
- * Sign in with Google OAuth using ID token
+ * Sign in with Google OAuth using ID token from expo-auth-session
  */
 export async function signInWithGoogle(
   idToken: string,
   nonce?: string
 ): Promise<AuthResponse> {
   try {
-    console.log('🔐 Starting Google Sign-In...');
-    console.log('Token length:', idToken?.length);
-    
+    if (!looksLikeJwt(idToken)) {
+      return { success: false, error: 'Invalid Google idToken (not a JWT). Check Google Sign-In configuration.' };
+    }
+
+    // If the id_token contains a nonce claim, Supabase expects a matching nonce.
+    // To avoid mismatch errors across different clients, we derive the nonce directly
+    // from the token when present and only pass it in that case.
+    const tokenNonce = getJwtNonceClaim(idToken);
+    const nonceToSend = tokenNonce ? tokenNonce : undefined;
+
+    // Use signInWithIdToken without nonce parameter
+    // Supabase will validate the id_token directly
     const { data, error } = await supabase.auth.signInWithIdToken({
       provider: 'google',
       token: idToken,
@@ -285,66 +322,73 @@ export async function signInWithGoogle(
     });
 
     if (error) {
-      console.error('❌ signInWithIdToken error:', error);
       return { success: false, error: error.message };
     }
 
     if (!data.user) {
-      console.error('❌ No user data returned');
       return { success: false, error: 'No user data returned' };
     }
 
-    console.log('✅ User authenticated:', data.user.id);
-    console.log('📧 Email:', data.user.email);
-
-    // Use database function to create/get profile (bypasses RLS timing issues)
-    console.log('📝 Creating/retrieving profile via database function...');
-    
-    const fullName = data.user.user_metadata?.full_name || 
-                    data.user.user_metadata?.name || 
-                    data.user.email?.split('@')[0] || 
-                    'User';
-
-    const { data: profileData, error: profileError } = await (supabase.rpc as any)(
-      'create_profile_for_user',
-      {
-        p_user_id: data.user.id,
-        p_email: data.user.email || '',
-        p_full_name: fullName,
-        p_role: 'user'
-      }
-    );
-
-    if (profileError) {
-      console.error('❌ Database function error:', profileError);
-      return { 
-        success: false, 
-        error: `Failed to create profile: ${profileError.message}` 
-      };
+    // Ensure subsequent RLS queries are authenticated.
+    if (data.session) {
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
     }
 
-    if (!profileData) {
-      console.error('❌ No profile data returned from function');
-      return { 
-        success: false, 
-        error: 'Failed to retrieve profile data' 
-      };
-    }
-
-    console.log('✅ Profile created/retrieved successfully');
-    console.log('Profile:', profileData);
-
-    return {
-      success: true,
-      profile: profileData as Profile
-    };
-
+    return await ensureProfileForUser(data.user as any);
   } catch (error: any) {
-    console.error('❌ Unexpected error:', error);
+    return { success: false, error: error.message || 'Google sign in failed' };
+  }
+}
+
+/**
+ * Native Google sign-in for Expo React Native (recommended by Supabase docs).
+ * Requires a Development Build / custom dev client (not Expo Go).
+ */
+export async function signInWithGoogleNative(): Promise<AuthResponse> {
+  const mod = await loadGoogleSigninModule();
+  if (!mod?.GoogleSignin) {
     return {
       success: false,
-      error: error.message || 'An unexpected error occurred'
+      error:
+        'Google Sign-In native module not available. Use a Development Build / EAS build (not Expo Go), or disable nonce check in Supabase Google provider as a last resort.',
     };
+  }
+
+  const webClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
+
+  if (!webClientId) {
+    return {
+      success: false,
+      error: 'Missing EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (or EXPO_PUBLIC_GOOGLE_CLIENT_ID).',
+    };
+  }
+
+  try {
+    if (!googleSigninConfigured) {
+      mod.GoogleSignin.configure({ webClientId });
+      googleSigninConfigured = true;
+    }
+
+    // Android only (safe to call if present)
+    await mod.GoogleSignin.hasPlayServices?.();
+
+    const response = await mod.GoogleSignin.signIn();
+
+    // Support multiple response shapes across versions
+    const idToken = response?.data?.idToken || response?.idToken || response?.user?.idToken;
+    if (!idToken) {
+      return { success: false, error: 'Google Sign-In did not return idToken.' };
+    }
+
+    // Reuse existing Supabase + profile logic
+    return await signInWithGoogle(idToken);
+  } catch (error: any) {
+    // Keep message concise for UI
+    return { success: false, error: error?.message || 'Google native sign in failed' };
   }
 }
 
