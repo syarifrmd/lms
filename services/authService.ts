@@ -3,45 +3,8 @@ import { Database, Profile } from '@/types/database';
 import { makeRedirectUri } from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import { jwtDecode } from 'jwt-decode';
 
 WebBrowser.maybeCompleteAuthSession();
-
-const APP_SCHEME = 'lms';
-
-type GoogleSigninModule = {
-  GoogleSignin: {
-    configure: (options: { webClientId: string }) => void;
-    hasPlayServices?: () => Promise<void>;
-    signIn: () => Promise<any>;
-  };
-  statusCodes?: Record<string, string>;
-};
-
-let googleSigninConfigured = false;
-
-async function loadGoogleSigninModule(): Promise<GoogleSigninModule | null> {
-  try {
-    const mod = (await import('@react-native-google-signin/google-signin')) as unknown as GoogleSigninModule;
-    return mod;
-  } catch {
-    return null;
-  }
-}
-
-function getJwtNonceClaim(idToken: string): string | undefined {
-  try {
-    const payload = jwtDecode<{ nonce?: unknown }>(idToken);
-    return typeof payload?.nonce === 'string' ? payload.nonce : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function looksLikeJwt(token: string): boolean {
-  const parts = token.split('.');
-  return parts.length === 3 && parts[0].length > 0 && parts[1].length > 0;
-}
 
 export interface AuthResponse {
   success: boolean;
@@ -50,51 +13,7 @@ export interface AuthResponse {
 }
 
 type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
-
-type AuthUserLike = {
-  id: string;
-  email?: string | null;
-  user_metadata?: any;
-};
-
-async function ensureProfileForUser(user: AuthUserLike): Promise<AuthResponse> {
-  // Create a minimal profile from auth user data to allow immediate login.
-  // The actual DB profile should be created by trigger; we'll try to fetch it
-  // but won't block login if RLS prevents reading.
-  
-  console.log('[ensureProfile] Creating profile for user:', user.id);
-
-  // Try to fetch from DB once (non-blocking if fails due to RLS)
-  try {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (profile) {
-      console.log('[ensureProfile] Profile fetched from DB');
-      return { success: true, profile };
-    }
-  } catch (e) {
-    console.warn('[ensureProfile] Could not fetch profile from DB:', e);
-  }
-
-  // Fallback: create minimal profile from auth user metadata
-  // This allows login to succeed even if RLS blocks the read
-  console.log('[ensureProfile] Using fallback profile from auth metadata');
-  const fallbackProfile: Profile = {
-    user_id: user.id,
-    email: user.email || '',
-    full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-    role: 'user',
-    employee_id: user.user_metadata?.employee_id || null,
-    region: user.user_metadata?.region || null,
-    created_at: new Date().toISOString(),
-  };
-
-  return { success: true, profile: fallbackProfile };
-}
+type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
 
 /**
  * Sign in with email and password
@@ -117,7 +36,18 @@ export async function signInWithEmail(
       return { success: false, error: 'No user data returned' };
     }
 
-    return await ensureProfileForUser(data.user as any);
+    // Fetch user profile
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('user_id', data.user.id)
+      .single();
+
+    if (profileError) {
+      return { success: false, error: profileError.message };
+    }
+
+    return { success: true, profile };
   } catch (error: any) {
     return { success: false, error: error.message || 'Login failed' };
   }
@@ -152,7 +82,21 @@ export async function signUpWithEmail(
       return { success: false, error: 'No user data returned' };
     }
 
-    return await ensureProfileForUser(data.user as any);
+    // Profile should be created automatically by trigger
+    // Wait a bit for trigger to complete
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('user_id', data.user.id)
+      .single();
+
+    if (profileError) {
+      return { success: false, error: profileError.message };
+    }
+
+    return { success: true, profile };
   } catch (error: any) {
     return { success: false, error: error.message || 'Sign up failed' };
   }
@@ -193,7 +137,7 @@ export async function getCurrentSession() {
 export async function getCurrentProfile(): Promise<Profile | null> {
   try {
     const { data: { user } } = await supabase.auth.getUser();
-
+    
     if (!user) return null;
 
     const { data: profile, error } = await supabase
@@ -241,14 +185,6 @@ export async function updateProfile(
  * Setup Google OAuth hook
  */
 export function useGoogleAuth() {
-  const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
-
-  if (!clientId || clientId === 'your_google_client_id_here') {
-    console.warn('⚠️  EXPO_PUBLIC_GOOGLE_CLIENT_ID is not configured properly!');
-    console.warn('Please set it in your .env file or environment variables.');
-    console.warn('Get your Client ID from: https://console.cloud.google.com/apis/credentials');
-  }
-
   const [request, response, promptAsync] = Google.useAuthRequest({
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
@@ -259,7 +195,7 @@ export function useGoogleAuth() {
     // Add state parameter for CSRF protection
     usePKCE: false, // Disable PKCE since we're using id_token flow
     redirectUri: makeRedirectUri({
-      scheme: APP_SCHEME,
+      scheme: 'com.indosat.lms',
       path: 'auth/callback'
     }),
   });
@@ -268,11 +204,10 @@ export function useGoogleAuth() {
 }
 
 /**
- * Sign in with Google OAuth using ID token
+ * Sign in with Google OAuth
  */
 export async function signInWithGoogle(
-  idToken: string,
-  nonce?: string
+  idToken: string
 ): Promise<AuthResponse> {
   try {
     console.log('🔐 Starting Google Sign-In...');
@@ -281,7 +216,6 @@ export async function signInWithGoogle(
     const { data, error } = await supabase.auth.signInWithIdToken({
       provider: 'google',
       token: idToken,
-      nonce: nonceToSend,
     });
 
     if (error) {
@@ -356,7 +290,7 @@ export async function resetPassword(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${APP_SCHEME}://reset-password`,
+      redirectTo: 'com.indosat.lms://reset-password',
     });
 
     if (error) {

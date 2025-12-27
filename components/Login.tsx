@@ -1,24 +1,24 @@
 import { useApp } from '@/context/AppContext';
-import { signInWithEmail, signInWithGoogle, signInWithGoogleNative, signUpWithEmail, useGoogleAuth } from '@/services/authService';
+import { signInWithEmail, signInWithGoogle, signUpWithEmail, useGoogleAuth } from '@/services/authService';
 import { useRouter } from 'expo-router';
 import { Lock, LogIn, Mail, User, UserPlus } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export const Login: React.FC = () => {
-    const { setCurrentProfile } = useApp();
-    const [isSignUp, setIsSignUp] = useState(false);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [fullName, setFullName] = useState('');
-    const [employeeId, setEmployeeId] = useState('');
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(false);
-    const router = useRouter();
-
-    // Google OAuth setup (fallback flow)
-    const { response, promptAsync } = useGoogleAuth();
+  const { setCurrentProfile } = useApp();
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+  
+  // Google OAuth setup
+  const { request, response, promptAsync } = useGoogleAuth();
 
   useEffect(() => {
     if (response?.type === 'success') {
@@ -63,108 +63,91 @@ export const Login: React.FC = () => {
     }
   };
 
-    const handleLogin = async () => {
-      if (!email || !password) {
-        setError('Please enter email and password');
-        return;
-      }
+  const handleLogin = async () => {
+    if (!email || !password) {
+      setError('Please enter email and password');
+      return;
+    }
 
-      setLoading(true);
-      setError('');
+    setLoading(true);
+    setError('');
 
-      try {
-        const result = await signInWithEmail(email, password);
+    try {
+      const result = await signInWithEmail(email, password);
 
-        if (result.success && result.profile) {
-          setCurrentProfile(result.profile);
-          router.replace('/dashboard' as any);
-        } else {
-          setError(result.error || 'Login failed');
-        }
-      } catch (err: any) {
-        setError(err.message || 'An error occurred');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const handleSignUp = async () => {
-      if (!email || !password || !fullName) {
-        setError('Please fill in all required fields');
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        setError('Passwords do not match');
-        return;
-      }
-
-      if (password.length < 6) {
-        setError('Password must be at least 6 characters');
-        return;
-      }
-
-      setLoading(true);
-      setError('');
-
-      try {
-        const result = await signUpWithEmail(email, password, fullName, employeeId || undefined);
-
-        if (result.success && result.profile) {
-          setCurrentProfile(result.profile);
-          router.replace('/dashboard' as any);
-        } else {
-          setError(result.error || 'Sign up failed');
-        }
-      } catch (err: any) {
-        setError(err.message || 'An error occurred');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const handleSubmit = () => {
-      if (isSignUp) {
-        handleSignUp();
+      if (result.success && result.profile) {
+        setCurrentProfile(result.profile);
+        router.replace('/dashboard' as any);
       } else {
-        handleLogin();
+        setError(result.error || 'Login failed');
       }
-    };
+    } catch (err: any) {
+      setError(err.message || 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const toggleMode = () => {
-      setIsSignUp(!isSignUp);
+  const handleSignUp = async () => {
+    if (!email || !password || !fullName) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await signUpWithEmail(email, password, fullName, employeeId || undefined);
+
+      if (result.success && result.profile) {
+        setCurrentProfile(result.profile);
+        router.replace('/dashboard' as any);
+      } else {
+        setError(result.error || 'Sign up failed');
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (isSignUp) {
+      handleSignUp();
+    } else {
+      handleLogin();
+    }
+  };
+
+  const toggleMode = () => {
+    setIsSignUp(!isSignUp);
+    setError('');
+    setPassword('');
+    setConfirmPassword('');
+    setFullName('');
+    setEmployeeId('');
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
       setError('');
-      setPassword('');
-      setConfirmPassword('');
-      setFullName('');
-      setEmployeeId('');
-    };
-
-    const handleGoogleLogin = async () => {
-      try {
-        setError('');
-        setLoading(true);
-
-        // Prefer native Google Sign-In (recommended for Expo RN + Supabase)
-        const native = await signInWithGoogleNative();
-        if (native.success && native.profile) {
-          setCurrentProfile(native.profile);
-          router.replace('/dashboard' as any);
-          setLoading(false);
-          return;
-        }
-
-        // Fallback to expo-auth-session (e.g. web / Expo Go)
-        setLoading(false);
-        if (native.error) {
-          console.warn('[GoogleAuth] Native sign-in failed, falling back:', native.error);
-        }
-        await promptAsync();
-      } catch (err: any) {
-        setError(err.message || 'Google sign in error');
-        setLoading(false);
-      }
-    };
+      await promptAsync();
+    } catch (err: any) {
+      setError(err.message || 'Google sign in error');
+    }
+  };
 
   return (
     <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
@@ -338,15 +321,15 @@ export const Login: React.FC = () => {
               {/* Google Sign In Button */}
               <TouchableOpacity
                 onPress={handleGoogleLogin}
-                disabled={loading}
+                disabled={!request || loading}
                 className={`w-full py-3 rounded-lg flex-row items-center justify-center gap-2 border-2 ${
-                  loading ? 'border-gray-200 bg-gray-100' : 'border-gray-300 bg-white'
+                  !request || loading ? 'border-gray-200 bg-gray-100' : 'border-gray-300 bg-white'
                 }`}
               >
                 <View className="w-5 h-5">
                   <Text>🔍</Text>
                 </View>
-                <Text className={`font-semibold ${loading ? 'text-gray-400' : 'text-gray-700'}`}>
+                <Text className={`font-semibold ${!request || loading ? 'text-gray-400' : 'text-gray-700'}`}>
                   Continue with Google
                 </Text>
               </TouchableOpacity>
@@ -372,7 +355,7 @@ export const Login: React.FC = () => {
                   </Text>
                   <TouchableOpacity onPress={toggleMode} className="mt-3">
                     <Text className="text-sm text-red-600 text-center font-medium">
-                      Don&apos;t have an account? Sign Up
+                      Don't have an account? Sign Up
                     </Text>
                   </TouchableOpacity>
                 </>
