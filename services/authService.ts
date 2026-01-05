@@ -299,81 +299,81 @@ export function useGoogleAuth() {
 /**
  * Sign in with Google OAuth
  */
-export async function signInWithGoogle(
-  idToken: string
-): Promise<AuthResponse> {
-  try {
-    console.log('🔐 Starting Google Sign-In...');
-    console.log('Token length:', idToken?.length);
+// export async function signInWithGoogle(
+//   idToken: string
+// ): Promise<AuthResponse> {
+//   try {
+//     console.log('🔐 Starting Google Sign-In...');
+//     console.log('Token length:', idToken?.length);
     
-    const { data, error } = await supabase.auth.signInWithIdToken({
-      provider: 'google',
-      token: idToken,
-    });
+//     const { data, error } = await supabase.auth.signInWithIdToken({
+//       provider: 'google',
+//       token: idToken,
+//     });
 
-    if (error) {
-      console.error('❌ signInWithIdToken error:', error);
-      return { success: false, error: error.message };
-    }
+//     if (error) {
+//       console.error('❌ signInWithIdToken error:', error);
+//       return { success: false, error: error.message };
+//     }
 
-    if (!data.user) {
-      console.error('❌ No user data returned');
-      return { success: false, error: 'No user data returned' };
-    }
+//     if (!data.user) {
+//       console.error('❌ No user data returned');
+//       return { success: false, error: 'No user data returned' };
+//     }
 
-    console.log('✅ User authenticated:', data.user.id);
-    console.log('📧 Email:', data.user.email);
+//     console.log('✅ User authenticated:', data.user.id);
+//     console.log('📧 Email:', data.user.email);
 
-    // Use database function to create/get profile (bypasses RLS timing issues)
-    console.log('📝 Creating/retrieving profile via database function...');
+//     // Use database function to create/get profile (bypasses RLS timing issues)
+//     console.log('📝 Creating/retrieving profile via database function...');
     
-    const fullName = data.user.user_metadata?.full_name || 
-                    data.user.user_metadata?.name || 
-                    data.user.email?.split('@')[0] || 
-                    'User';
+//     const fullName = data.user.user_metadata?.full_name || 
+//                     data.user.user_metadata?.name || 
+//                     data.user.email?.split('@')[0] || 
+//                     'User';
 
-    const { data: profileData, error: profileError } = await (supabase.rpc as any)(
-      'create_profile_for_user',
-      {
-        p_user_id: data.user.id,
-        p_email: data.user.email || '',
-        p_full_name: fullName,
-        p_role: 'user'
-      }
-    );
+//     const { data: profileData, error: profileError } = await (supabase.rpc as any)(
+//       'create_profile_for_user',
+//       {
+//         p_user_id: data.user.id,
+//         p_email: data.user.email || '',
+//         p_full_name: fullName,
+//         p_role: 'user'
+//       }
+//     );
 
-    if (profileError) {
-      console.error('❌ Database function error:', profileError);
-      return { 
-        success: false, 
-        error: `Failed to create profile: ${profileError.message}` 
-      };
-    }
+//     if (profileError) {
+//       console.error('❌ Database function error:', profileError);
+//       return { 
+//         success: false, 
+//         error: `Failed to create profile: ${profileError.message}` 
+//       };
+//     }
 
-    if (!profileData) {
-      console.error('❌ No profile data returned from function');
-      return { 
-        success: false, 
-        error: 'Failed to retrieve profile data' 
-      };
-    }
+//     if (!profileData) {
+//       console.error('❌ No profile data returned from function');
+//       return { 
+//         success: false, 
+//         error: 'Failed to retrieve profile data' 
+//       };
+//     }
 
-    console.log('✅ Profile created/retrieved successfully');
-    console.log('Profile:', profileData);
+//     console.log('✅ Profile created/retrieved successfully');
+//     console.log('Profile:', profileData);
 
-    return {
-      success: true,
-      profile: profileData as Profile
-    };
+//     return {
+//       success: true,
+//       profile: profileData as Profile
+//     };
 
-  } catch (error: any) {
-    console.error('❌ Unexpected error:', error);
-    return {
-      success: false,
-      error: error.message || 'An unexpected error occurred'
-    };
-  }
-}
+//   } catch (error: any) {
+//     console.error('❌ Unexpected error:', error);
+//     return {
+//       success: false,
+//       error: error.message || 'An unexpected error occurred'
+//     };
+//   }
+// }
 
 /**
  * Reset password

@@ -1,8 +1,8 @@
 import { useApp } from '@/context/AppContext';
-import { signInWithEmail, signInWithGoogle, signUpWithEmail, useGoogleAuth } from '@/services/authService';
+import { signInWithEmail, signUpWithEmail } from '@/services/authService';
 import { useRouter } from 'expo-router';
 import { Lock, LogIn, Mail, User, UserPlus } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export const Login: React.FC = () => {
@@ -18,50 +18,50 @@ export const Login: React.FC = () => {
   const router = useRouter();
   
   // Google OAuth setup
-  const { request, response, promptAsync } = useGoogleAuth();
+  // const { request, response, promptAsync } = useGoogleAuth();
 
-  useEffect(() => {
-    if (response?.type === 'success') {
-      handleGoogleResponse(response);
-    }
-  }, [response]);
+  // useEffect(() => {
+  //   if (response?.type === 'success') {
+  //     handleGoogleResponse(response);
+  //   }
+  // }, [response]);
 
-  const handleGoogleResponse = async (response: any) => {
-    try {
-      setLoading(true);
-      setError('');
+  // const handleGoogleResponse = async (response: any) => {
+  //   try {
+  //     setLoading(true);
+  //     setError('');
       
-      // Extract id_token from response - check multiple possible locations
-      let idToken = response.authentication?.idToken || 
-                   response.params?.id_token || 
-                   response.params?.authentication?.idToken;
+  //     // Extract id_token from response - check multiple possible locations
+  //     let idToken = response.authentication?.idToken || 
+  //                  response.params?.id_token || 
+  //                  response.params?.authentication?.idToken;
 
-      console.log('Google OAuth Response Type:', response.type);
-      console.log('Has authentication object:', !!response.authentication);
-      console.log('Has params object:', !!response.params);
-      console.log('Extracted idToken:', idToken ? 'Found' : 'Not found');
+  //     console.log('Google OAuth Response Type:', response.type);
+  //     console.log('Has authentication object:', !!response.authentication);
+  //     console.log('Has params object:', !!response.params);
+  //     console.log('Extracted idToken:', idToken ? 'Found' : 'Not found');
 
-      if (!idToken) {
-        console.error('Full response structure:', JSON.stringify(response, null, 2));
-        setError('No ID token received from Google. Please try again.');
-        return;
-      }
+  //     if (!idToken) {
+  //       console.error('Full response structure:', JSON.stringify(response, null, 2));
+  //       setError('No ID token received from Google. Please try again.');
+  //       return;
+  //     }
 
-      const result = await signInWithGoogle(idToken);
+  //     const result = await signInWithGoogle(idToken);
 
-      if (result.success && result.profile) {
-        setCurrentProfile(result.profile);
-        router.replace('/dashboard' as any);
-      } else {
-        setError(result.error || 'Google sign in failed');
-      }
-    } catch (err: any) {
-      console.error('Google auth error:', err);
-      setError(err.message || 'Google authentication error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  //     if (result.success && result.profile) {
+  //       setCurrentProfile(result.profile);
+  //       router.replace('/dashboard' as any);
+  //     } else {
+  //       setError(result.error || 'Google sign in failed');
+  //     }
+  //   } catch (err: any) {
+  //     console.error('Google auth error:', err);
+  //     setError(err.message || 'Google authentication error');
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -140,14 +140,14 @@ export const Login: React.FC = () => {
     setEmployeeId('');
   };
 
-  const handleGoogleLogin = async () => {
-    try {
-      setError('');
-      await promptAsync();
-    } catch (err: any) {
-      setError(err.message || 'Google sign in error');
-    }
-  };
+  // const handleGoogleLogin = async () => {
+  //   try {
+  //     setError('');
+  //     await promptAsync();
+  //   } catch (err: any) {
+  //     setError(err.message || 'Google sign in error');
+  //   }
+  // };
 
   return (
     <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
@@ -312,14 +312,14 @@ export const Login: React.FC = () => {
               </TouchableOpacity>
 
               {/* Divider */}
-              <View className="flex-row items-center my-4">
+              {/* <View className="flex-row items-center my-4">
                 <View className="flex-1 h-px bg-gray-300" />
                 <Text className="px-4 text-gray-500 text-sm">OR</Text>
                 <View className="flex-1 h-px bg-gray-300" />
-              </View>
+              </View> */}
 
               {/* Google Sign In Button */}
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 onPress={handleGoogleLogin}
                 disabled={!request || loading}
                 className={`w-full py-3 rounded-lg flex-row items-center justify-center gap-2 border-2 ${
@@ -333,7 +333,7 @@ export const Login: React.FC = () => {
                   Continue with Google
                 </Text>
               </TouchableOpacity>
-            </View>
+            </View> */}
 
             {/* Info Text */}
             <View className="mt-6 pt-6 border-t border-gray-200">
@@ -364,6 +364,7 @@ export const Login: React.FC = () => {
           </View>
         </View>
       </View>
+    </View>
     </ScrollView>
   );
 };
